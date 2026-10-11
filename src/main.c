@@ -473,31 +473,6 @@ static void bap_broadcast_assistant_discover_cb(struct bt_conn *conn, int err, u
 }
 
 /**
- * Reads the sink's receive state directly.
- *
- * The JM320 does not reliably notify after a source swap, so asking is
- * the only way to learn whether the new source actually took. A read is
- * mandatory in BASS where notifications are optional.
- */
-static void recv_state_poll_handler(struct k_work *work)
-{
-	int err;
-
-	if (broadcast_sink_conn == NULL) {
-		return;
-	}
-
-	printk("Polling the sink's receive state\n");
-
-	err = bt_bap_broadcast_assistant_read_recv_state(broadcast_sink_conn, 0);
-	if (err != 0) {
-		printk("Polled read failed (%d)\n", err);
-	}
-}
-
-static K_WORK_DELAYABLE_DEFINE(recv_state_poll, recv_state_poll_handler);
-
-/**
  * When bt_bap_broadcast_assistant_add_src adds a source
  * via sink's BASS service. 
  * 
@@ -513,12 +488,8 @@ static void bap_broadcast_assistant_add_src_cb(struct bt_conn *conn, int err)
 	}
 
 	printk("BASS add source successful\n");
-
-	/* Scheduled rather than called directly: a GATT read cannot be
-	 * issued from inside a GATT callback.
-	 */
-	k_work_schedule(&recv_state_poll, K_SECONDS(2));
 }
+
 /**
  * Adding a source via sink's BASS service. 
  * 
