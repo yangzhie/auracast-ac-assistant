@@ -48,6 +48,7 @@ static const struct bt_data ad[] = {
  * Advertising payload. Is the scan response - active scanner can send a scan
  * request after hearing an advertisment, device replies with second payload.
  * Initialized array of bt_data: discoverable, LE only, no classic Bluetooth.
+ * 
  * const = puts it in flash, not ram; static = file-local, live the whole program.
  */
 static const struct bt_data sd[] = {

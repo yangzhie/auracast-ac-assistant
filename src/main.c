@@ -45,12 +45,10 @@
 // Temp. struct for one advertisement
 struct scan_recv_info {
 	struct metadata metadata;
-	char bt_name[NAME_LEN]; // Device local name
 	char broadcast_name[NAME_LEN]; // Auracast name 
 	uint32_t broadcast_id; // 24-bit Auracast Broadcast ID
 	bool has_metadata;
 	bool has_bass; // BASS flag
-	bool has_pacs; // PACS flag
 };
 
 // Broadcast code
@@ -126,11 +124,6 @@ static bool device_found(struct bt_data *data, void *user_data)
 		}
 
 		return true;
-	case BT_DATA_NAME_SHORTENED: // Truncated device name
-	case BT_DATA_NAME_COMPLETE: // Full device name
-		// Copy the name, or 29 bytes whichever one is smallest
-		memcpy(sr_info->bt_name, data->data, MIN(data->data_len, NAME_LEN - 1));
-		return true;
 	case BT_DATA_BROADCAST_NAME: // Auracast broadcast name
 		// Auracast's own name field
 		memcpy(sr_info->broadcast_name, data->data, MIN(data->data_len, NAME_LEN - 1));
@@ -152,13 +145,6 @@ static bool device_found(struct bt_data *data, void *user_data)
 			return true;
 		}
 
-		// Check: element has PACS
-		// TODO: deprecate
-		if (bt_uuid_cmp(&adv_uuid.uuid, BT_UUID_PACS) == 0) {
-			sr_info->has_pacs = true;
-			return true;
-		}
-
 		// Check: is it a Broadcast Audio Announcement?
 		if (bt_uuid_cmp(&adv_uuid.uuid, BT_UUID_BROADCAST_AUDIO) != 0) {
 			return true;
@@ -170,33 +156,6 @@ static bool device_found(struct bt_data *data, void *user_data)
 		}
 
 		sr_info->broadcast_id = sys_get_le24(data->data + BT_UUID_SIZE_16);
-		return true;
-	case BT_DATA_UUID16_SOME: // Partial/full list of 16-bit service UUIDs
-	case BT_DATA_UUID16_ALL: // Type 0x03: see if element has BASS or PACS
-		// Odd length = malformed
-		if (data->data_len % sizeof(uint16_t) != 0U) {
-			printk("UUID16 AD malformed\n");
-			return true;
-		}
-
-		// 2 bytes at a time
-		for (size_t i = 0; i < data->data_len; i += sizeof(uint16_t)) {
-			const struct bt_uuid *uuid;
-			uint16_t u16;
-
-			memcpy(&u16, &data->data[i], sizeof(u16));
-			uuid = BT_UUID_DECLARE_16(sys_le16_to_cpu(u16));
-
-			if (bt_uuid_cmp(uuid, BT_UUID_BASS) == 0) {
-				sr_info->has_bass = true;
-				continue;
-			}
-
-			if (bt_uuid_cmp(uuid, BT_UUID_PACS) == 0) {
-				sr_info->has_pacs = true;
-				continue;
-			}
-		}
 		return true;
 	default:
 		return true;
@@ -241,7 +200,6 @@ static void scan_recv_cb(const struct bt_le_scan_recv_info *info, struct net_buf
 			}
 
 			printk("Broadcast Source Found:\n");
-			printk("BT Name: %s\n", sr_info.bt_name);
 			printk("Broadcast Name: %s\n", sr_info.broadcast_name);
 			printk("Broadcast ID: 0x%06x\n\n", sr_info.broadcast_id);
 			
@@ -277,9 +235,6 @@ static void scan_recv_cb(const struct bt_le_scan_recv_info *info, struct net_buf
 
 		// Check: BASS is found
 		if (sr_info.has_bass) {
-			printk("Broadcast Sink Found:\n");
-			printk("BT Name: %s\n", sr_info.bt_name);
-
 			// Once a sink is remembered, only reconnect to that one
 			if (sink_link_has_sink() && !sink_link_matches(info->addr)) {
 				printk("Not the remembered sink, ignoring\n\n");
@@ -292,7 +247,7 @@ static void scan_recv_cb(const struct bt_le_scan_recv_info *info, struct net_buf
 				printk("bt_le_scan_stop failed with %d\n", err);
 			}
 
-			printk("Connecting to Broadcast Sink: %s\n", sr_info.bt_name);
+			printk("Connecting to Broadcast Sink\n");
 
 			// Who to connect to, creation params, connection interval + latency, write conn handle
 			err = bt_conn_le_create(info->addr, BT_CONN_LE_CREATE_CONN, BT_BAP_CONN_PARAM_RELAXED, &broadcast_sink_conn);
@@ -307,19 +262,10 @@ static void scan_recv_cb(const struct bt_le_scan_recv_info *info, struct net_buf
 }
 
 /**
- * Fires when a scan ends - duration expired.
- */ 
-static void scan_timeout_cb(void)
-{
-	printk("Scan timeout\n");
-}
-
-/**
  * vtable - struct of function pointers.
  */ 
 static struct bt_le_scan_cb scan_callbacks = {
 	.recv = scan_recv_cb,
-	.timeout = scan_timeout_cb,
 };
 
 /**
@@ -844,6 +790,7 @@ int main(void)
 			 * must go before the new one can be added.
 			 */
 			remove_current_source();
+			k_sleep(K_SECONDS(2));
 
 			stop = gatt_link_get_requested_stop_index();
 
